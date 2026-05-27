@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Modèles (trop lourds pour git si > 100Mo)
+# models/*.pkl  ← décommenter si tes modèles dépassent 100Mo
+
+# Data brute
+data/churn.csv
+data/synthetic_offers.csv
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.DS_Store
