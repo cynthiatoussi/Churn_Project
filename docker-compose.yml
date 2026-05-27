@@ -1,20 +1,111 @@
-# docker-compose.yml — à compléter avec les vraies images
+# ─────────────────────────────────────────────────────────────
+# docker-compose.yml — projet CPR
+# ─────────────────────────────────────────────────────────────
+# Orchestre les 3 services du pipeline en local.
+# Usage : docker-compose up --build
+#
+# Ordre de démarrage garanti par depends_on + healthcheck :
+#   monitoring → preprocessing → inference
+#
+# IMPORTANT : à lancer depuis la RACINE du projet
+# (pas depuis services/) car le build de l'inference
+# a besoin d'accéder à models/ à la racine.
+# ─────────────────────────────────────────────────────────────
+
 version: "3.9"
+
 services:
+
+  # ───────────────────────────────────────────────────────────
+  # Service monitoring
+  # Premier à démarrer — les autres services l'appellent
+  # ───────────────────────────────────────────────────────────
+  monitoring:
+    # Nom de l'image sur Docker Hub (format : username/nom:tag)
+    image: cyndy155/monitoring-cpr:1.0.0
+    build:
+      # Le context est le dossier du service
+      # (tout ce qui est dans ce dossier est accessible au build)
+      context: ./services/monitoring
+      dockerfile: Dockerfile
+    ports:
+      # host:container — accessible depuis ta machine sur localhost:8002
+      - "8002:8002"
+    networks:
+      - cpr-network
+    # Health check — docker-compose attend que /health réponde 200
+    # avant de démarrer les services qui dépendent de monitoring
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ───────────────────────────────────────────────────────────
+  # Service preprocessing
+  # Deuxième à démarrer — appelé par inference
+  # ───────────────────────────────────────────────────────────
   preprocessing:
-    build: ./services/preprocessing
+    image: cyndy155/preprocessing-cpr:1.0.0
+    build:
+      context: ./services/preprocessing
+      dockerfile: Dockerfile
     ports:
       - "8001:8001"
+    networks:
+      - cpr-network
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
+  # ───────────────────────────────────────────────────────────
+  # Service inference
+  # Dernier à démarrer — orchestre tout le pipeline
+  # ───────────────────────────────────────────────────────────
   inference:
-    build: ./services/inference
+    image: cyndy155/inference-cpr:1.0.0
+    build:
+      # IMPORTANT : le context est la RACINE du projet
+      # car le Dockerfile copie models/ qui est à la racine
+      context: .
+      dockerfile: services/inference/Dockerfile
     ports:
+      # C'est ce port qu'on donne au script de charge --url
       - "8000:8000"
+    networks:
+      - cpr-network
+    # Variables d'environnement — URLs des autres services
+    # En docker-compose, les noms de services font office de DNS
+    # "monitoring" résout vers le conteneur monitoring, etc.
+    environment:
+      - PREPROCESSING_URL=http://preprocessing:8001
+      - MONITORING_URL=http://monitoring:8002
+    # Attend que preprocessing ET monitoring soient healthy
+    # avant de démarrer inference (sinon les appels HTTP échouent)
     depends_on:
-      - preprocessing
-      - monitoring
+      monitoring:
+        condition: service_healthy
+      preprocessing:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
 
-  monitoring:
-    build: ./services/monitoring
-    ports:
-      - "8002:8002"
+# ─────────────────────────────────────────────────────────────
+# Réseau interne partagé par les 3 services
+# Permet aux conteneurs de se parler par leur nom de service
+# (ex : inference appelle http://preprocessing:8001)
+# ─────────────────────────────────────────────────────────────
+networks:
+  cpr-network:
+    driver: bridge
