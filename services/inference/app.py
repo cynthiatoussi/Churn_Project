@@ -26,7 +26,6 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import httpx
 import joblib
@@ -43,9 +42,12 @@ PREPROCESSING_URL = os.getenv("PREPROCESSING_URL", "http://preprocessing:8001")
 MONITORING_URL    = os.getenv("MONITORING_URL",    "http://monitoring:8002")
 
 # ─────────────────────────────────────────────────────────────
-# Chemins des artefacts — copiés dans l'image au build
+# Chemins des artefacts — configurables via variable d'env
+# En Docker  : /app/models/    (copié par le Dockerfile)
+# En local   : services/inference/models/ (chemin par défaut)
+# En test    : models/ à la racine du projet (via MODELS_DIR=...)
 # ─────────────────────────────────────────────────────────────
-MODELS_DIR         = os.path.join(os.path.dirname(__file__), "models")
+MODELS_DIR = os.getenv("MODELS_DIR",os.path.join(os.path.dirname(__file__), "models"))
 CHURN_PIPELINE_PATH = os.path.join(MODELS_DIR, "churn_pipeline.pkl")
 OFFER_PIPELINE_PATH = os.path.join(MODELS_DIR, "offer_pipeline.pkl")
 CONFIG_PATH         = os.path.join(MODELS_DIR, "config.json")
@@ -73,11 +75,11 @@ async def lifespan(app: FastAPI):
 
     # Chargement du pipeline churn (ColumnTransformer + RandomForest)
     state["churn_pipeline"] = joblib.load(CHURN_PIPELINE_PATH)
-    print(f"[STARTUP] churn_pipeline chargé ✓")
+    print("[STARTUP] churn_pipeline chargé ✓")
 
     # Chargement du pipeline offres (ColumnTransformer + XGBoost multi-classe)
     state["offer_pipeline"] = joblib.load(OFFER_PIPELINE_PATH)
-    print(f"[STARTUP] offer_pipeline chargé ✓")
+    print("[STARTUP] offer_pipeline chargé ✓")
 
     # Chargement de la config (seuil + noms des classes d'offres)
     with open(CONFIG_PATH) as f:
@@ -89,7 +91,7 @@ async def lifespan(app: FastAPI):
 
     yield  # le service tourne ici
 
-    # Nettoyage à l'arrêt (optionnel mais propre)
+    # Nettoyage à l'arrêt
     print("[SHUTDOWN] Arrêt du service d'inférence")
 
 
@@ -131,8 +133,8 @@ class CustomerProfile(BaseModel):
 # Schéma de réponse — format attendu par load_test.py
 # ─────────────────────────────────────────────────────────────
 class PredictionResponse(BaseModel):
-    churn_probability:  float
-    recommended_offer:  str
+    churn_probability: float
+    recommended_offer: str
 
 
 # ─────────────────────────────────────────────────────────────
@@ -144,7 +146,7 @@ async def predict(profile: CustomerProfile):
     Pipeline complet de prédiction :
         1. Appel preprocessing → features enrichies
         2. Prédiction churn
-        3. Si churn > seuil → prédiction offre
+        3. Si churn >= seuil → prédiction offre
         4. Log des métriques (fire-and-forget)
         5. Retour de la réponse
     """
@@ -155,8 +157,6 @@ async def predict(profile: CustomerProfile):
         async with httpx.AsyncClient(timeout=5.0) as client:
 
             # ── Étape 1 : appel au service preprocessing ──────
-            # Envoie le profil brut, reçoit les features enrichies
-            # avec num_services, tenure_group, charge_per_tenure, no_internet
             prep_response = await client.post(
                 f"{PREPROCESSING_URL}/process",
                 json=profile.model_dump(),
@@ -177,9 +177,7 @@ async def predict(profile: CustomerProfile):
             # ── Étape 3 : prédiction de l'offre si churn élevé ─
             # Le seuil configurable est chargé depuis config.json
             if churn_proba >= state["threshold"]:
-                offer_pred = state["offer_pipeline"].predict(df)[0]
-                # offer_pred est un entier (index de classe)
-                # on le convertit en nom d'offre via offer_classes
+                offer_pred        = state["offer_pipeline"].predict(df)[0]
                 recommended_offer = state["offer_classes"][int(offer_pred)]
 
             # ── Étape 4 : log des métriques (fire-and-forget) ──
