@@ -106,7 +106,8 @@ jobs:
         with:
           # context = dossier du service
           context: ./services/monitoring
-          dockerfile: ./services/monitoring/Dockerfile
+          # file = chemin exact du Dockerfile (paramètre correct pour v5)
+          file: ./services/monitoring/Dockerfile
           push: true
           # Tag de version : 1.0.0 + tag "latest"
           tags: |
@@ -118,7 +119,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./services/preprocessing
-          dockerfile: ./services/preprocessing/Dockerfile
+          # file = chemin exact du Dockerfile (paramètre correct pour v5)
+          file: ./services/preprocessing/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/preprocessing-cpr:1.0.0
@@ -131,7 +133,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          dockerfile: ./services/inference/Dockerfile
+          # file = chemin exact du Dockerfile (paramètre correct pour v5)
+          file: ./services/inference/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/inference-cpr:1.0.0
