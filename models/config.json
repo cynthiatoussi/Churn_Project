@@ -1,0 +1,10 @@
+{
+  "churn_threshold": 0.32,
+  "offer_classes": [
+    "maintien_standard",
+    "offre_fidelite",
+    "option_gratuite",
+    "remise_tarifaire",
+    "upgrade_forfait"
+  ]
+}
