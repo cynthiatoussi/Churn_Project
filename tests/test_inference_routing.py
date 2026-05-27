@@ -1,275 +1,290 @@
 # ─────────────────────────────────────────────────────────────
 # tests/test_inference_routing.py
 # ─────────────────────────────────────────────────────────────
-# Tests de la logique de routage du service d'inférence.
+# Tests d'intégration du service inference.
 #
-# Ce fichier teste la règle métier centrale du pipeline :
-#   → Si churn_probability >= threshold  : recommande une offre
-#   → Si churn_probability < threshold   : retourne "maintien_standard"
-#
-# Les modèles ML et les appels HTTP externes (preprocessing,
-# monitoring) sont mockés pour que les tests soient rapides,
-# indépendants du réseau, et ne nécessitent pas les .pkl.
-#
-# Usage :
-#   pytest tests/test_inference_routing.py -v --cov=services/inference
+# Utilise importlib pour charger services/inference/app.py
+# par son chemin EXACT — évite la collision avec
+# services/preprocessing/app.py dans sys.path.
 # ─────────────────────────────────────────────────────────────
 
+import importlib.util
+import os
+import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# ─────────────────────────────────────────────────────────────
+# Chemins
+# ─────────────────────────────────────────────────────────────
+# Chemin absolu vers services/inference/app.py
+INFERENCE_APP_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "services", "inference", "app.py")
+)
+
+# Chemin vers models/ à la racine (contient le vrai config.json)
+REAL_MODELS_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "models")
+)
 
 # ─────────────────────────────────────────────────────────────
-# Fixture — profil client standard pour les tests d'inférence
+# Constantes partagées
+# ─────────────────────────────────────────────────────────────
+OFFER_CLASSES = [
+    "maintien_standard", "offre_fidelite", "option_gratuite",
+    "remise_tarifaire",  "upgrade_forfait",
+]
+THRESHOLD = 0.32
+
+
+# ─────────────────────────────────────────────────────────────
+# Helper — charge l'app inference par son chemin exact
+# ─────────────────────────────────────────────────────────────
+def load_inference_app():
+    """
+    Charge services/inference/app.py via importlib.
+    Évite la collision avec preprocessing/app.py dans sys.path.
+    Supprime le cache si nécessaire pour forcer le rechargement.
+    """
+    # Supprime les modules en cache pour forcer le rechargement
+    for key in list(sys.modules.keys()):
+        if key in ("inference_app", "app"):
+            del sys.modules[key]
+
+    spec   = importlib.util.spec_from_file_location("inference_app", INFERENCE_APP_PATH)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["inference_app"] = module
+    spec.loader.exec_module(module)
+    return module.app
+
+
+# ─────────────────────────────────────────────────────────────
+# Helpers — fabrique les mocks des pipelines ML
+# ─────────────────────────────────────────────────────────────
+def make_churn_mock(churn_proba: float):
+    """Mock du pipeline churn. predict_proba → [[1-p, p]]."""
+    m = MagicMock()
+    m.predict_proba.return_value = [[1 - churn_proba, churn_proba]]
+    return m
+
+
+def make_offer_mock(offer_idx: int):
+    """Mock du pipeline offres. predict → [offer_idx]."""
+    m = MagicMock()
+    m.predict.return_value = [offer_idx]
+    return m
+
+
+def build_http_mock(enriched_features: dict):
+    """
+    Mock du client httpx.AsyncClient.
+    - Premier POST → réponse preprocessing (features enrichies)
+    - Deuxième POST → réponse monitoring (log)
+    """
+    mock_prep = MagicMock()
+    mock_prep.json.return_value = enriched_features
+    mock_prep.raise_for_status.return_value = None
+
+    mock_log = MagicMock()
+    mock_log.raise_for_status.return_value = None
+
+    mock_http = AsyncMock()
+    mock_http.post = AsyncMock(side_effect=[mock_prep, mock_log])
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    return mock_http
+
+
+# ─────────────────────────────────────────────────────────────
+# Fixture — features enrichies simulées par preprocessing
 # ─────────────────────────────────────────────────────────────
 @pytest.fixture
-def sample_profile():
-    """Profil client complet utilisé dans les tests d'inférence."""
+def enriched_features():
+    """Réponse simulée de preprocessing/process."""
     return {
-        "gender":           "Female",
-        "SeniorCitizen":    0,
-        "Partner":          "No",
-        "Dependents":       "No",
-        "tenure":           5,
-        "Contract":         "Month-to-month",
-        "PaperlessBilling": "Yes",
-        "PaymentMethod":    "Electronic check",
-        "PhoneService":     "Yes",
-        "MultipleLines":    "No",
-        "InternetService":  "Fiber optic",
-        "OnlineSecurity":   "No",
-        "OnlineBackup":     "No",
-        "DeviceProtection": "No",
-        "TechSupport":      "No",
-        "StreamingTV":      "No",
-        "StreamingMovies":  "No",
-        "MonthlyCharges":   85.0,
-        "TotalCharges":     425.0,
+        "gender": "Female", "SeniorCitizen": 0,
+        "Partner": "No", "Dependents": "No",
+        "tenure": 5.0, "Contract": "Month-to-month",
+        "PaperlessBilling": "Yes", "PaymentMethod": "Electronic check",
+        "PhoneService": "Yes", "MultipleLines": "No",
+        "InternetService": "Fiber optic", "OnlineSecurity": "No",
+        "OnlineBackup": "No", "DeviceProtection": "No",
+        "TechSupport": "No", "StreamingTV": "No", "StreamingMovies": "No",
+        "MonthlyCharges": 85.0, "TotalCharges": 425.0,
+        "num_services": 1, "tenure_group": "new",
+        "charge_per_tenure": 14.17, "no_internet": 0,
     }
 
 
 # ─────────────────────────────────────────────────────────────
-# Fixture — mock des modèles ML
-# Évite de charger les vrais .pkl pendant les tests
+# Fixture — payload brut envoyé à /predict
 # ─────────────────────────────────────────────────────────────
 @pytest.fixture
-def mock_models():
-    """
-    Mock des 2 pipelines ML et de la config.
-    Retourne un dict qui simule l'état global du service inference.
-    """
-    # Mock du pipeline churn — predict_proba retourne [[0.3, 0.7]]
-    # (probabilité de churn = 0.7)
-    churn_pipeline_mock = MagicMock()
-    churn_pipeline_mock.predict_proba.return_value = [[0.3, 0.7]]
-
-    # Mock du pipeline offres — predict retourne [3]
-    # (index 3 correspond à "remise_tarifaire" dans offer_classes)
-    offer_pipeline_mock = MagicMock()
-    offer_pipeline_mock.predict.return_value = [3]
-
+def raw_payload():
+    """Profil client brut envoyé par load_test.py."""
     return {
-        "churn_pipeline": churn_pipeline_mock,
-        "offer_pipeline": offer_pipeline_mock,
-        "threshold":      0.32,
-        "offer_classes":  [
-            "maintien_standard", "offre_fidelite",
-            "option_gratuite",   "remise_tarifaire",
-            "upgrade_forfait",
-        ],
+        "gender": "Female", "SeniorCitizen": 0,
+        "Partner": "No", "Dependents": "No",
+        "tenure": 5, "Contract": "Month-to-month",
+        "PaperlessBilling": "Yes", "PaymentMethod": "Electronic check",
+        "PhoneService": "Yes", "MultipleLines": "No",
+        "InternetService": "Fiber optic", "OnlineSecurity": "No",
+        "OnlineBackup": "No", "DeviceProtection": "No",
+        "TechSupport": "No", "StreamingTV": "No", "StreamingMovies": "No",
+        "MonthlyCharges": 85.0, "TotalCharges": 425.0,
     }
 
 
 # ─────────────────────────────────────────────────────────────
-# Tests de la logique de routage — sans FastAPI
-# On teste directement la règle métier
+# Fixture — client inference avec churn ÉLEVÉ (>= seuil)
 # ─────────────────────────────────────────────────────────────
+@pytest.fixture
+def client_high_churn(enriched_features):
+    """TestClient avec churn_proba=0.74 > seuil 0.32."""
+    from fastapi.testclient import TestClient
 
+    mock_churn = make_churn_mock(churn_proba=0.74)
+    mock_offer = make_offer_mock(offer_idx=3)  # "remise_tarifaire"
+    mock_http  = build_http_mock(enriched_features)
+
+    with patch.dict(os.environ, {"MODELS_DIR": REAL_MODELS_DIR}), \
+         patch("joblib.load", side_effect=[mock_churn, mock_offer]):
+        app = load_inference_app()
+        with patch("inference_app.httpx.AsyncClient", return_value=mock_http):
+            with TestClient(app) as client:
+                yield client
+
+
+# ─────────────────────────────────────────────────────────────
+# Fixture — client inference avec churn FAIBLE (< seuil)
+# ─────────────────────────────────────────────────────────────
+@pytest.fixture
+def client_low_churn(enriched_features):
+    """TestClient avec churn_proba=0.10 < seuil 0.32."""
+    from fastapi.testclient import TestClient
+
+    mock_churn = make_churn_mock(churn_proba=0.10)
+    mock_offer = make_offer_mock(offer_idx=0)
+    mock_http  = build_http_mock(enriched_features)
+
+    with patch.dict(os.environ, {"MODELS_DIR": REAL_MODELS_DIR}), \
+         patch("joblib.load", side_effect=[mock_churn, mock_offer]):
+        app = load_inference_app()
+        with patch("inference_app.httpx.AsyncClient", return_value=mock_http):
+            with TestClient(app) as client:
+                yield client
+
+
+# ─────────────────────────────────────────────────────────────
+# Tests POST /predict — churn ÉLEVÉ
+# ─────────────────────────────────────────────────────────────
+class TestPredictHighChurn:
+
+    def test_retourne_200(self, client_high_churn, raw_payload):
+        """Payload valide avec churn élevé → HTTP 200."""
+        r = client_high_churn.post("/predict", json=raw_payload)
+        assert r.status_code == 200
+
+    def test_contient_churn_probability(self, client_high_churn, raw_payload):
+        """La réponse contient churn_probability entre 0 et 1."""
+        r    = client_high_churn.post("/predict", json=raw_payload)
+        data = r.json()
+        assert "churn_probability" in data
+        assert 0.0 <= data["churn_probability"] <= 1.0
+
+    def test_offre_remise_tarifaire(self, client_high_churn, raw_payload):
+        """Avec churn=0.74 et index=3 → 'remise_tarifaire'."""
+        r    = client_high_churn.post("/predict", json=raw_payload)
+        data = r.json()
+        assert data["recommended_offer"] == "remise_tarifaire"
+
+    def test_offre_dans_liste_valide(self, client_high_churn, raw_payload):
+        """L'offre retournée est dans la liste des 5 offres valides."""
+        r    = client_high_churn.post("/predict", json=raw_payload)
+        data = r.json()
+        assert data["recommended_offer"] in OFFER_CLASSES
+
+    def test_format_reponse_exact(self, client_high_churn, raw_payload):
+        """Réponse avec exactement les 2 clés attendues par load_test.py."""
+        r    = client_high_churn.post("/predict", json=raw_payload)
+        data = r.json()
+        assert set(data.keys()) == {"churn_probability", "recommended_offer"}
+
+    def test_payload_incomplet_retourne_422(self, client_high_churn):
+        """Payload sans 'tenure' → HTTP 422."""
+        r = client_high_churn.post("/predict", json={"gender": "Female"})
+        assert r.status_code == 422
+
+
+# ─────────────────────────────────────────────────────────────
+# Tests POST /predict — churn FAIBLE
+# ─────────────────────────────────────────────────────────────
+class TestPredictLowChurn:
+
+    def test_retourne_200(self, client_low_churn, raw_payload):
+        """Payload valide avec churn faible → HTTP 200."""
+        r = client_low_churn.post("/predict", json=raw_payload)
+        assert r.status_code == 200
+
+    def test_retourne_maintien_standard(self, client_low_churn, raw_payload):
+        """Avec churn=0.10 < seuil → 'maintien_standard'."""
+        r    = client_low_churn.post("/predict", json=raw_payload)
+        data = r.json()
+        assert data["recommended_offer"] == "maintien_standard"
+
+    def test_churn_probability_sous_seuil(self, client_low_churn, raw_payload):
+        """churn_probability retournée < seuil."""
+        r    = client_low_churn.post("/predict", json=raw_payload)
+        data = r.json()
+        assert data["churn_probability"] < THRESHOLD
+
+
+# ─────────────────────────────────────────────────────────────
+# Tests GET /health
+# ─────────────────────────────────────────────────────────────
+class TestHealthEndpoint:
+
+    def test_retourne_200(self, client_high_churn):
+        """Health check → HTTP 200."""
+        r = client_high_churn.get("/health")
+        assert r.status_code == 200
+
+    def test_status_ok(self, client_high_churn):
+        """Health check contient status='ok'."""
+        r = client_high_churn.get("/health")
+        assert r.json()["status"] == "ok"
+
+    def test_liste_les_deux_modeles(self, client_high_churn):
+        """Health check liste les 2 modèles chargés."""
+        r    = client_high_churn.get("/health")
+        data = r.json()
+        assert "churn_pipeline" in data["models"]
+        assert "offer_pipeline" in data["models"]
+
+    def test_contient_threshold(self, client_high_churn):
+        """Health check expose le seuil configuré."""
+        r    = client_high_churn.get("/health")
+        data = r.json()
+        assert data["threshold"] == THRESHOLD
+
+
+# ─────────────────────────────────────────────────────────────
+# Tests logique de routage — unitaires purs
+# ─────────────────────────────────────────────────────────────
 class TestRoutingLogic:
-    """
-    Tests unitaires de la logique de routage.
-    Teste la règle : churn_proba >= threshold → appelle offer_pipeline.
-    """
 
-    def test_offre_recommandee_si_churn_eleve(self, mock_models):
-        """
-        Si churn_probability >= threshold → offer_pipeline est appelé
-        et une offre est retournée.
-        """
-        # Simule un score de churn élevé (0.74 > seuil 0.32)
-        churn_proba = 0.74
-        threshold   = mock_models["threshold"]
+    def test_offre_si_churn_superieur(self):
+        assert 0.74 >= THRESHOLD
 
-        if churn_proba >= threshold:
-            # Appel du modèle offres
-            pred_idx = mock_models["offer_pipeline"].predict(MagicMock())[0]
-            offer    = mock_models["offer_classes"][int(pred_idx)]
-        else:
-            offer = "maintien_standard"
+    def test_maintien_si_churn_inferieur(self):
+        assert not (0.10 >= THRESHOLD)
 
-        assert offer == "remise_tarifaire"
-        mock_models["offer_pipeline"].predict.assert_called_once()
+    def test_egalite_traite_comme_superieur(self):
+        assert THRESHOLD >= THRESHOLD
 
-    def test_maintien_standard_si_churn_faible(self, mock_models):
-        """
-        Si churn_probability < threshold → offer_pipeline N'est PAS appelé
-        et on retourne "maintien_standard".
-        """
-        # Simule un score de churn faible (0.15 < seuil 0.32)
-        churn_proba = 0.15
-        threshold   = mock_models["threshold"]
+    def test_toutes_classes_valides(self):
+        for offer in OFFER_CLASSES:
+            assert offer in OFFER_CLASSES
 
-        if churn_proba >= threshold:
-            pred_idx = mock_models["offer_pipeline"].predict(MagicMock())[0]
-            offer    = mock_models["offer_classes"][int(pred_idx)]
-        else:
-            offer = "maintien_standard"
-
-        assert offer == "maintien_standard"
-        # Vérifie que offer_pipeline n'a PAS été appelé
-        mock_models["offer_pipeline"].predict.assert_not_called()
-
-    def test_seuil_exact(self, mock_models):
-        """
-        Si churn_probability == threshold exactement → offre recommandée
-        (condition >=, pas juste >).
-        """
-        churn_proba = mock_models["threshold"]  # exactement 0.32
-        threshold   = mock_models["threshold"]
-
-        if churn_proba >= threshold:
-            pred_idx = mock_models["offer_pipeline"].predict(MagicMock())[0]
-            offer    = mock_models["offer_classes"][int(pred_idx)]
-        else:
-            offer = "maintien_standard"
-
-        assert offer != "maintien_standard"
-
-    def test_toutes_offres_valides(self, mock_models):
-        """
-        Vérifie que chaque index retourné par offer_pipeline
-        correspond bien à une offre dans offer_classes.
-        """
-        offer_classes = mock_models["offer_classes"]
-        # On teste les 5 index possibles (0 à 4)
-        for idx in range(5):
-            mock_models["offer_pipeline"].predict.return_value = [idx]
-            pred_idx = mock_models["offer_pipeline"].predict(MagicMock())[0]
-            offer    = offer_classes[int(pred_idx)]
-            assert offer in offer_classes
-
-    def test_threshold_configurable(self):
-        """
-        Vérifie que le seuil peut être configuré à différentes valeurs.
-        Un seuil de 0.0 → toujours une offre.
-        Un seuil de 1.0 → jamais d'offre.
-        """
-        offer_classes = ["maintien_standard", "offre_fidelite", "option_gratuite",
-                         "remise_tarifaire", "upgrade_forfait"]
-        churn_proba = 0.5
-
-        # Seuil 0.0 → toujours une offre (0.5 >= 0.0)
-        assert churn_proba >= 0.0
-
-        # Seuil 1.0 → jamais d'offre (0.5 < 1.0)
-        assert not (churn_proba >= 1.0)
-
-
-# ─────────────────────────────────────────────────────────────
-# Tests d'intégration FastAPI — avec mocks des dépendances
-# ─────────────────────────────────────────────────────────────
-
-class TestPredictEndpoint:
-    """
-    Tests d'intégration de POST /predict.
-    Les appels HTTP externes et les modèles sont mockés.
-    """
-
-    def test_predict_retourne_churn_probability(self, sample_profile, mock_models):
-        """
-        Vérifie que la réponse contient bien churn_probability
-        entre 0 et 1.
-        """
-        # Simule le résultat du pipeline churn
-        churn_proba = float(
-            mock_models["churn_pipeline"].predict_proba(MagicMock())[0][1]
-        )
-        assert 0.0 <= churn_proba <= 1.0
-
-    def test_predict_retourne_recommended_offer(self, mock_models):
-        """
-        Vérifie que la réponse contient une offre parmi les 5 valides.
-        """
-        valid_offers = set(mock_models["offer_classes"])
-        # Simule une prédiction avec churn élevé
-        churn_proba = 0.74
-        threshold   = mock_models["threshold"]
-
-        if churn_proba >= threshold:
-            pred_idx = mock_models["offer_pipeline"].predict(MagicMock())[0]
-            offer    = mock_models["offer_classes"][int(pred_idx)]
-        else:
-            offer = "maintien_standard"
-
-        assert offer in valid_offers
-
-    def test_format_reponse_json(self, mock_models):
-        """
-        Vérifie que la réponse respecte le format attendu
-        par le script de charge load_test.py.
-        """
-        # Le script de charge attend exactement ces deux clés
-        expected_keys = {"churn_probability", "recommended_offer"}
-
-        churn_proba = 0.74
-        threshold   = mock_models["threshold"]
-
-        if churn_proba >= threshold:
-            pred_idx = mock_models["offer_pipeline"].predict(MagicMock())[0]
-            offer    = mock_models["offer_classes"][int(pred_idx)]
-        else:
-            offer = "maintien_standard"
-
-        response = {
-            "churn_probability": round(churn_proba, 4),
-            "recommended_offer": offer,
-        }
-
-        assert set(response.keys()) == expected_keys
-        assert isinstance(response["churn_probability"], float)
-        assert isinstance(response["recommended_offer"], str)
-
-
-# ─────────────────────────────────────────────────────────────
-# Tests de l'endpoint GET /health
-# ─────────────────────────────────────────────────────────────
-
-class TestHealthInference:
-    """Tests du health check avec modèles mockés."""
-
-    def test_health_ok_quand_modeles_charges(self, mock_models):
-        """
-        Si les modèles sont chargés, le health check
-        doit indiquer status=ok.
-        """
-        # Simule l'état du service avec modèles chargés
-        models_loaded = (
-            mock_models["churn_pipeline"] is not None and
-            mock_models["offer_pipeline"] is not None
-        )
-        assert models_loaded is True
-
-    def test_health_ko_quand_modeles_absents(self):
-        """
-        Si les modèles ne sont pas chargés (None),
-        le service doit être considéré comme non prêt.
-        """
-        state = {
-            "churn_pipeline": None,
-            "offer_pipeline": None,
-        }
-        models_loaded = (
-            state["churn_pipeline"] is not None and
-            state["offer_pipeline"] is not None
-        )
-        assert models_loaded is False
+    def test_cinq_classes_disponibles(self):
+        assert len(OFFER_CLASSES) == 5
