@@ -1,0 +1,10 @@
+# ─────────────────────────────────────────────────────────────
+# services/preprocessing/requirements.txt
+# Versions pinned — obligatoire pour la reproductibilité
+# Le service preprocessing ne charge aucun modèle ML,
+# il n'a besoin que de FastAPI pour l'API REST.
+# ─────────────────────────────────────────────────────────────
+
+fastapi==0.111.0    # framework API REST
+uvicorn==0.29.0     # serveur ASGI pour FastAPI
+pydantic==2.7.1     # validation des données d'entrée
