@@ -1,13 +1,14 @@
 # ─────────────────────────────────────────────────────────────
 # services/inference/Dockerfile
 # ─────────────────────────────────────────────────────────────
+# IMPORTANT : ce Dockerfile est buildé depuis la RACINE du projet
+# (context = .) pour pouvoir accéder à models/ à la racine.
+# Les chemins COPY sont donc relatifs à la racine du projet.
+#
 # Ce service charge 2 modèles ML (churn_pipeline + offer_pipeline)
 # qui totalisent ~24Mo. L'image finale sera ~500-600Mo avec
 # toutes les dépendances sklearn/xgboost — en dessous du seuil
 # de 1Go donc pas besoin de multi-stage build.
-#
-# Les modèles sont copiés depuis models/ à la racine du repo
-# lors du build Docker. Ils font partie de l'image finale.
 # ─────────────────────────────────────────────────────────────
 
 FROM python:3.11-slim
@@ -16,16 +17,16 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Installation des dépendances en premier
-# (optimise le cache Docker — cette couche n'est reconstruite
-#  que si requirements.txt change)
-COPY requirements.txt .
+# Chemin depuis la racine du projet (context = .)
+COPY services/inference/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copie du code applicatif
-COPY app.py .
+# Chemin depuis la racine du projet (context = .)
+COPY services/inference/app.py .
 
 # Copie des artefacts modèles depuis models/ à la racine du repo
-# Les 2 pipelines + config.json sont embarqués dans l'image
+# Ces fichiers sont accessibles car le context est la racine (.)
 COPY models/churn_pipeline.pkl  ./models/
 COPY models/offer_pipeline.pkl  ./models/
 COPY models/config.json         ./models/
@@ -38,8 +39,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
-# Démarrage avec Gunicorn + workers Uvicorn
-# --workers 2 : dimensionné pour 700m CPU (règle : 2 × 0.7 + 1 ≈ 2)
-# Permet de tenir 150 req/min sans saturer (Flask mono-threadé
-# aurait saturé à ce niveau — cf. défi spécifique du Cas 3)
+# Démarrage avec 2 workers Uvicorn
+# Dimensionné pour 700m CPU (règle : 2 × 0.7 + 1 ≈ 2)
+# Permet de tenir 150 req/min sans saturer
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
