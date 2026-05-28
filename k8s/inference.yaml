@@ -1,0 +1,161 @@
+# ─────────────────────────────────────────────────────────────
+# k8s/inference.yaml — Deployment + Service inference
+# ─────────────────────────────────────────────────────────────
+# Service principal et le plus lourd du pipeline.
+# Charge les 2 modèles ML au démarrage et les garde en mémoire.
+# Orchestre le pipeline complet (preprocessing → prédiction → monitoring).
+#
+# Valeurs de ressources — base de raisonnement :
+#
+#   MÉMOIRE :
+#   Un service qui charge des modèles ML consomme la quasi-totalité
+#   de sa mémoire au DÉMARRAGE lors du chargement des poids (cf. cours).
+#   La consommation sous charge n'augmente pas beaucoup car les modèles
+#   restent en mémoire une fois chargés.
+#
+#   Estimation du pic mémoire au démarrage :
+#     Python + FastAPI                  ~50Mi
+#     pandas + sklearn + xgboost        ~150Mi
+#     churn_pipeline.pkl (~22Mo)        ~25Mi
+#     offer_pipeline.pkl (~1.3Mo)       ~5Mi
+#     ──────────────────────────────────────
+#     Total estimé                      ~230Mi
+#
+#   → requests RAM 300Mi : couvre le pic de démarrage (130% de 230Mi)
+#   → limits RAM   512Mi : marge pour les pics sous charge intense
+#
+#   CPU :
+#   Le défi spécifique du Cas 3 est de tenir à 150 req/min.
+#   Un service Flask mono-threadé saturerait. Solution : Gunicorn
+#   avec 2 workers (règle : 2 × nb_cores + 1, avec 0.7 core → 2 workers)
+#
+#   → requests CPU 700m  : 0.7 core → 2 workers Gunicorn confortables
+#   → limits CPU  1200m  : burst possible jusqu'à 1.2 CPU
+#
+# IMPORTANT : ces valeurs sont des ESTIMATIONS raisonnées.
+# Elles seront mesurées et validées avec kubectl top pods
+# pendant la séance 4 (challenge de charge).
+# La règle du cours : requests = 70-80% du pic mesuré,
+#                     limits   = 120-130% du pic mesuré.
+# ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+  namespace: projet-CPR
+  labels:
+    app: inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference
+  # ── Stratégie de déploiement ─────────────────────────────
+  # RollingUpdate choisi car :
+  #   1. La contrainte métier impose une latence < 200ms
+  #      → pas de downtime acceptable
+  #   2. Le calcul de marge (depuis l'ADR) confirme la faisabilité :
+  #      quota disponible   = 2500m CPU / 1536Mi RAM
+  #      ressources totales = 850m  CPU /  492Mi RAM (3 services)
+  #      marge disponible   = 1650m CPU / 1044Mi RAM
+  #      pod inference      =  700m CPU /  300Mi RAM
+  #      1650m > 700m ✅ et 1044Mi > 300Mi ✅ → RollingUpdate possible
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # 1 pod inference supplémentaire pendant la MAJ
+      maxUnavailable: 0  # aucun pod indisponible → pas de downtime
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      containers:
+        - name: inference
+          image: cyndy155/inference-cpr:1.0.0
+          ports:
+            - containerPort: 8000
+          # ── Variables d'environnement ──────────────────
+          # Permettent au service d'appeler les autres services
+          # via leurs noms DNS Kubernetes (définis dans leurs Services)
+          # En Kubernetes : http://preprocessing-svc:8001
+          # En local (docker-compose) : http://preprocessing:8001
+          # La variable d'env permet les deux sans changer le code
+          env:
+            - name: PREPROCESSING_URL
+              # preprocessing-svc = nom du Service Kubernetes défini
+              # dans preprocessing.yaml → résolu par CoreDNS
+              value: "http://preprocessing-svc:8001"
+            - name: MONITORING_URL
+              # monitoring-svc = nom du Service Kubernetes défini
+              # dans monitoring.yaml → résolu par CoreDNS
+              value: "http://monitoring-svc:8002"
+          resources:
+            requests:
+              # 700m = 0.7 CPU → dimensionné pour 2 workers Gunicorn
+              # (règle : 2 × 0.7 + 1 ≈ 2 workers)
+              # Permet de tenir 150 req/min au niveau stress
+              cpu: "700m"
+              # 300Mi couvre le pic de démarrage (~230Mi estimé)
+              # avec une marge de 30%
+              memory: "300Mi"
+            limits:
+              # 1200m : burst autorisé pendant les pics de charge
+              # throttling silencieux au-delà → latence augmente
+              # mais le pod ne redémarre pas
+              cpu: "1200m"
+              # 512Mi : marge pour les pics sous charge intense
+              # OOMKill si dépassé → pod redémarre
+              memory: "512Mi"
+          # ── Health checks ────────────────────────────────
+          # initialDelaySeconds plus long pour inference car :
+          # → les modèles ML mettent plusieurs secondes à se charger
+          # → FastAPI attend que joblib.load() termine avant d'être prêt
+          # → /health retourne 503 tant que les modèles ne sont pas chargés
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30  # laisse le temps aux modèles de charger
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15  # vérifie la readiness après 15s
+            periodSeconds: 10
+---
+# ─────────────────────────────────────────────────────────────
+# Service NodePort — accessible depuis l'extérieur du cluster
+# ─────────────────────────────────────────────────────────────
+# NodePort est utilisé uniquement pour inference car c'est le
+# seul service qui doit recevoir des requêtes depuis l'extérieur
+# (le script de charge load_test.py tourne sur la machine hôte).
+#
+# Les services monitoring et preprocessing restent en ClusterIP
+# car ils ne sont appelés que par les autres pods en interne.
+#
+# Pour récupérer l'URL accessible depuis ta machine :
+#   minikube service inference-svc -n projet-CPR --url
+#
+# Cette URL est celle à passer au script de charge :
+#   python scripts/load_test.py --case churn --level nominal \
+#     --url http://HOST:PORT/predict
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-svc
+  namespace: projet-CPR
+spec:
+  # NodePort = expose un port sur le nœud Minikube
+  # accessible depuis la machine hôte
+  type: NodePort
+  selector:
+    app: inference
+  ports:
+    - port: 8000        # port du Service (interne au cluster)
+      targetPort: 8000  # port du conteneur
+      # nodePort non spécifié → Kubernetes attribue automatiquement
+      # un port entre 30000 et 32767

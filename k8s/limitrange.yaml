@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────
+# k8s/limitrange.yaml — LimitRange du namespace projet-CPR
+# ─────────────────────────────────────────────────────────────
+# Le LimitRange contrôle les valeurs INDIVIDUELLES de chaque
+# conteneur (contrairement au ResourceQuota qui contrôle le total).
+#
+# Rôle de chaque champ :
+#
+#   min          → plancher absolu. Kubernetes rejette tout pod
+#                  qui déclare moins que ces valeurs.
+#                  Fixé au minimum viable pour un processus Python.
+#
+#   max          → plafond absolu par conteneur.
+#                  Correspond au service le plus lourd (inference).
+#                  Un pod qui dépasse ces valeurs est rejeté.
+#
+#   default      → limits appliquées automatiquement si un conteneur
+#                  n'en déclare pas. Sans ça, un pod sans limits
+#                  pourrait consommer TOUTES les ressources du nœud.
+#
+#   defaultRequest → requests appliquées automatiquement si non
+#                    déclarées. IMPORTANT : si on déclare default
+#                    sans defaultRequest, Kubernetes fixe
+#                    requests = limits, ce qui sur-réserve le quota.
+#
+# Valeurs choisies sur la base de la nature des services :
+#   min    : minimum viable pour un processus Python FastAPI
+#   max    : calé sur les limits du service inference (le plus lourd)
+#   default/defaultRequest : valeurs intermédiaires raisonnables
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: projet-limitrange
+  namespace: projet-CPR
+spec:
+  limits:
+    - type: Container
+
+      # ── Plancher ──────────────────────────────────────────
+      # En dessous de ces valeurs, Kubernetes refuse le pod.
+      # 50m CPU = 5% d'un CPU — minimum pour un processus Python.
+      # 64Mi = minimum pour FastAPI + dépendances de base.
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+
+      # ── Plafond ───────────────────────────────────────────
+      # Au-dessus de ces valeurs, Kubernetes refuse le pod.
+      # 1200m = calé sur limits.cpu du service inference.
+      # 512Mi = calé sur limits.memory du service inference.
+      max:
+        cpu: "1200m"
+        memory: "512Mi"
+
+      # ── Limits par défaut ─────────────────────────────────
+      # Appliquées si un conteneur ne déclare pas de limits.
+      # CPU  : throttling silencieux au-delà de 200m
+      # RAM  : OOMKill au-delà de 256Mi
+      default:
+        cpu: "200m"
+        memory: "256Mi"
+
+      # ── Requests par défaut ───────────────────────────────
+      # Appliquées si un conteneur ne déclare pas de requests.
+      # Ces valeurs sont réservées sur le nœud même si non utilisées.
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"

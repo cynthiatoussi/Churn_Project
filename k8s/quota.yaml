@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────
+# k8s/quota.yaml — ResourceQuota du namespace projet-CPR
+# ─────────────────────────────────────────────────────────────
+# Un ResourceQuota fixe un plafond global pour le namespace.
+# La SOMME des requests/limits de TOUS les pods ne peut pas
+# dépasser ces valeurs. Si elle est dépassée → nouveau pod rejeté
+# avec l'erreur "exceeded quota".
+#
+# Cas 3 : Prédiction de churn
+# Quota imposé par le TP : 2500m CPU / 1.5Gi mémoire
+#
+# Pourquoi inférieur à la capacité de Minikube (4 CPU / 6144Mo) ?
+#   → Kubernetes lui-même consomme ~0.5-1 CPU et 500Mo-1Go
+#     (kubelet, API server, etcd, kube-proxy)
+#   → Les opérations RollingUpdate nécessitent une marge temporaire
+#     au-delà des requests déclarées
+#
+# Calcul de vérification (depuis l'ADR) :
+#   preprocessing : requests 100m CPU / 128Mi RAM
+#   inference     : requests 700m CPU / 300Mi RAM
+#   monitoring    : requests  50m CPU /  64Mi RAM
+#   ─────────────────────────────────────────────
+#   TOTAL         : requests 850m CPU / 492Mi RAM
+#   QUOTA         :          2500m CPU / 1536Mi RAM
+#   MARGE         :          1650m CPU / 1044Mi RAM ← pour RollingUpdate
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: projet-quota
+  namespace: projet-CPR
+spec:
+  hard:
+    # ── CPU ───────────────────────────────────────────────────
+    # 2500m = 2.5 CPU logiques
+    # Total déclaré par les 3 services : 850m → marge de 1650m
+    # Cette marge permet un RollingUpdate du service inference
+    # (700m supplémentaires pendant la transition)
+    requests.cpu: "2500m"
+    limits.cpu: "2500m"
+
+    # ── Mémoire ───────────────────────────────────────────────
+    # 1536Mi = 1.5Gi
+    # Total déclaré par les 3 services : 492Mi → marge de 1044Mi
+    # Cette marge absorbe les pics de consommation du service
+    # inference lors du chargement des modèles ML au démarrage
+    requests.memory: "1536Mi"
+    limits.memory: "1536Mi"

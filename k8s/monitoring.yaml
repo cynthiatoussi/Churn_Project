@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────
+# k8s/monitoring.yaml — Deployment + Service monitoring
+# ─────────────────────────────────────────────────────────────
+# Service le plus léger du pipeline.
+# Pas de modèle ML — stocke uniquement des compteurs en mémoire.
+# Reçoit les métriques de chaque prédiction via POST /log.
+# Expose un tableau de bord via GET /metrics.
+#
+# Valeurs de ressources — base de raisonnement :
+#   Ce service ne charge aucun modèle. Il ne fait que stocker
+#   des entiers et des listes en mémoire Python. La consommation
+#   est quasi constante quelle que soit la charge.
+#   → requests CPU  50m  : 5% d'un CPU, largement suffisant
+#   → requests RAM  64Mi : Python + FastAPI au démarrage
+#   → limits CPU   100m  : throttling au-delà (acceptable)
+#   → limits RAM   128Mi : OOMKill si les listes grossissent trop
+#
+# IMPORTANT : ces valeurs seront ajustées après mesure avec
+# kubectl top pods sous charge réelle (séance 4).
+#
+# Accès pendant les tests :
+#   kubectl port-forward svc/monitoring-svc 8002:8002 -n projet-CPR
+#   curl http://localhost:8002/metrics
+# ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring
+  namespace: projet-CPR
+  labels:
+    app: monitoring
+spec:
+  replicas: 1
+  selector:
+    # Kubernetes utilise ce label pour savoir quels pods
+    # appartiennent à ce Deployment
+    matchLabels:
+      app: monitoring
+  # ── Stratégie de déploiement ─────────────────────────────
+  # RollingUpdate : démarre le nouveau pod AVANT de tuer l'ancien
+  # → pas de downtime pendant les mises à jour
+  # Justification quota : pod monitoring = 50m CPU / 64Mi RAM
+  # Marge disponible = 1650m CPU / 1044Mi → RollingUpdate possible
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # au plus 1 pod supplémentaire pendant la MAJ
+      maxUnavailable: 0  # aucun pod indisponible pendant la MAJ
+  template:
+    metadata:
+      labels:
+        app: monitoring
+    spec:
+      containers:
+        - name: monitoring
+          # Image construite et poussée par le pipeline CI/CD GitHub Actions
+          image: cyndy155/monitoring-cpr:1.0.0
+          ports:
+            - containerPort: 8002
+          # ── Ressources ──────────────────────────────────
+          # requests : ce que Kubernetes RÉSERVE sur le nœud
+          #            (garanti même si non utilisé)
+          # limits   : le plafond absolu
+          #            CPU → throttling silencieux si dépassé
+          #            RAM → OOMKill si dépassé
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+          # ── Health checks ────────────────────────────────
+          # livenessProbe  : Kubernetes redémarre le pod si /health
+          #                  ne répond plus (pod bloqué)
+          # readinessProbe : Kubernetes n'envoie pas de trafic tant
+          #                  que le pod n'est pas prêt
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 10  # laisse le temps à FastAPI de démarrer
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+# ─────────────────────────────────────────────────────────────
+# Service ClusterIP — réseau interne uniquement
+# ─────────────────────────────────────────────────────────────
+# ClusterIP donne un nom DNS stable au pod monitoring.
+# Les autres pods l'appellent via : http://monitoring-svc:8002
+# Sans ce Service, les pods devraient utiliser l'IP du pod
+# qui change à chaque redémarrage.
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-svc
+  namespace: projet-CPR
+spec:
+  # ClusterIP = accessible uniquement depuis l'intérieur du cluster
+  # Pas besoin d'exposer monitoring à l'extérieur
+  type: ClusterIP
+  selector:
+    app: monitoring  # cible les pods avec ce label
+  ports:
+    - port: 8002       # port du Service (utilisé par les autres pods)
+      targetPort: 8002 # port du conteneur

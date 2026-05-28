@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────────────────────
+# k8s/preprocessing.yaml — Deployment + Service preprocessing
+# ─────────────────────────────────────────────────────────────
+# Reçoit le profil client brut, applique le feature engineering
+# (num_services, tenure_group, charge_per_tenure, no_internet)
+# et retourne les features enrichies au service d'inférence.
+#
+# Ce service ne charge AUCUN modèle ML.
+# Il effectue uniquement des transformations Python sur des
+# dictionnaires JSON légers.
+#
+# Valeurs de ressources — base de raisonnement :
+#   Un service de preprocessing sans modèle consomme surtout
+#   du CPU lors des transformations et peu de mémoire (cf. cours).
+#   Les payloads Telco sont de petits dictionnaires JSON (~1Ko).
+#
+#   → requests CPU  100m : transformations légères sur petits JSON
+#   → requests RAM  128Mi: Python + FastAPI + pandas au démarrage
+#   → limits CPU   200m  : throttling acceptable (transformations rapides)
+#   → limits RAM   256Mi : pas de modèle → consommation stable
+#
+# IMPORTANT : ces valeurs seront validées après kubectl top pods
+# sous charge réelle (séance 4 — challenge de charge).
+# ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessing
+  namespace: projet-CPR
+  labels:
+    app: preprocessing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: preprocessing
+  # ── Stratégie de déploiement ─────────────────────────────
+  # RollingUpdate justifié : pod preprocessing = 100m / 128Mi
+  # Marge quota disponible = 1650m CPU / 1044Mi → OK
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # 1 pod supplémentaire max pendant la MAJ
+      maxUnavailable: 0  # pas de downtime → contrainte < 200ms
+  template:
+    metadata:
+      labels:
+        app: preprocessing
+    spec:
+      containers:
+        - name: preprocessing
+          image: cyndy155/preprocessing-cpr:1.0.0
+          ports:
+            - containerPort: 8001
+          resources:
+            requests:
+              # 100m = 10% d'un CPU
+              # Suffisant pour des transformations sur petits JSON
+              # Valeur à affiner avec kubectl top après mesure
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              # Throttling au-delà de 200m → acceptable car
+              # les transformations sont rapides (<5ms par requête)
+              cpu: "200m"
+              # OOMKill au-delà de 256Mi → safe car pas de modèle
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+# ─────────────────────────────────────────────────────────────
+# Service ClusterIP — réseau interne uniquement
+# ─────────────────────────────────────────────────────────────
+# L'inference appelle ce service via : http://preprocessing-svc:8001
+# Le nom "preprocessing-svc" est résolu automatiquement par le
+# DNS interne de Kubernetes (CoreDNS).
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: preprocessing-svc
+  namespace: projet-CPR
+spec:
+  type: ClusterIP
+  selector:
+    app: preprocessing
+  ports:
+    - port: 8001
+      targetPort: 8001
