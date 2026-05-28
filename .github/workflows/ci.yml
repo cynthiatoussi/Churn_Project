@@ -137,5 +137,5 @@ jobs:
           file: ./services/inference/Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/inference-cpr:1.0.0
+            ${{ secrets.DOCKERHUB_USERNAME }}/inference-cpr:1.0.1
             ${{ secrets.DOCKERHUB_USERNAME }}/inference-cpr:latest

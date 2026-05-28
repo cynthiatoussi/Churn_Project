@@ -72,7 +72,7 @@ spec:
     spec:
       containers:
         - name: inference
-          image: cyndy155/inference-cpr:1.0.0
+          image: cyndy155/inference-cpr:1.0.1
           ports:
             - containerPort: 8000
           # ── Variables d'environnement ──────────────────
