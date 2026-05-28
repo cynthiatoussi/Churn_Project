@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-# k8s/quota.yaml — ResourceQuota du namespace projet-CPR
+# k8s/quota.yaml — ResourceQuota du namespace projet-cpr
 # ─────────────────────────────────────────────────────────────
 # Un ResourceQuota fixe un plafond global pour le namespace.
 # La SOMME des requests/limits de TOUS les pods ne peut pas
@@ -28,7 +28,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: projet-quota
-  namespace: projet-CPR
+  namespace: projet-cpr
 spec:
   hard:
     # ── CPU ───────────────────────────────────────────────────

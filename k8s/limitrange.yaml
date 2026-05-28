@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-# k8s/limitrange.yaml — LimitRange du namespace projet-CPR
+# k8s/limitrange.yaml — LimitRange du namespace projet-cpr
 # ─────────────────────────────────────────────────────────────
 # Le LimitRange contrôle les valeurs INDIVIDUELLES de chaque
 # conteneur (contrairement au ResourceQuota qui contrôle le total).
@@ -32,7 +32,7 @@ apiVersion: v1
 kind: LimitRange
 metadata:
   name: projet-limitrange
-  namespace: projet-CPR
+  namespace: projet-cpr
 spec:
   limits:
     - type: Container

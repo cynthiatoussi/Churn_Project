@@ -19,14 +19,14 @@
 # kubectl top pods sous charge réelle (séance 4).
 #
 # Accès pendant les tests :
-#   kubectl port-forward svc/monitoring-svc 8002:8002 -n projet-CPR
+#   kubectl port-forward svc/monitoring-svc 8002:8002 -n projet-cpr
 #   curl http://localhost:8002/metrics
 # ─────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: monitoring
-  namespace: projet-CPR
+  namespace: projet-cpr
   labels:
     app: monitoring
 spec:
@@ -100,7 +100,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: monitoring-svc
-  namespace: projet-CPR
+  namespace: projet-cpr
 spec:
   # ClusterIP = accessible uniquement depuis l'intérieur du cluster
   # Pas besoin d'exposer monitoring à l'extérieur

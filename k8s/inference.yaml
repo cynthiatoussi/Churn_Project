@@ -42,7 +42,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inference
-  namespace: projet-CPR
+  namespace: projet-cpr
   labels:
     app: inference
 spec:
@@ -137,7 +137,7 @@ spec:
 # car ils ne sont appelés que par les autres pods en interne.
 #
 # Pour récupérer l'URL accessible depuis ta machine :
-#   minikube service inference-svc -n projet-CPR --url
+#   minikube service inference-svc -n projet-cpr --url
 #
 # Cette URL est celle à passer au script de charge :
 #   python scripts/load_test.py --case churn --level nominal \
@@ -147,7 +147,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: inference-svc
-  namespace: projet-CPR
+  namespace: projet-cpr
 spec:
   # NodePort = expose un port sur le nœud Minikube
   # accessible depuis la machine hôte
