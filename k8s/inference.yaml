@@ -98,7 +98,7 @@ spec:
               cpu: "700m"
               # 300Mi couvre le pic de démarrage (~230Mi estimé)
               # avec une marge de 30%
-              memory: "300Mi"
+              memory: "400Mi"
             limits:
               # 1200m : burst autorisé pendant les pics de charge
               # throttling silencieux au-delà → latence augmente
