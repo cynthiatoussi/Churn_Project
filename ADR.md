@@ -63,3 +63,17 @@ Le paramètre `maxUnavailable: 0` est retenu car la contrainte métier du cas im
 | **TOTAL**        | **850m**    | **492Mi**      | **1500m** | **896Mi**    |
 | **QUOTA**        | **2500m**   | **1536Mi**     | **2500m** | **1536Mi**   |
 | **MARGE**        | **1650m**   | **1044Mi**     | **1000m** | **640Mi**    |
+
+
+---
+
+## Multi-stage build — service inference
+
+L'image du service d'inférence dépasse 1Go décompressée (1.54Go mesuré
+avec docker images). Un multi-stage build a été implémenté conformément
+aux exigences du TP. La réduction de taille est cependant minimale
+(1.54Go → 1.53Go) car les dépendances ML (scikit-learn, xgboost, numpy,
+pandas) sont distribuées sous forme de wheels pré-compilées sur PyPI —
+aucune compilation avec gcc/g++ n'a lieu, donc aucun outil de build
+n'est présent dans l'image finale à supprimer. La taille incompressible
+est celle des librairies ML elles-mêmes, toutes nécessaires au runtime.
