@@ -6,7 +6,7 @@
 # Structure en 2 jobs séquentiels :
 #   Job 1 : test  → lance pytest, vérifie couverture ≥ 80%
 #                   BLOQUE si les tests échouent
-#   Job 2 : build → construit et pousse les 3 images Docker Hub
+#   Job 2 : build → construit et pousse les 4 images Docker Hub
 #                   S'exécute UNIQUEMENT si job 1 est passé
 #
 # Secrets requis (Settings → Secrets → Actions) :
@@ -51,6 +51,8 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('services/preprocessing/requirements.txt', 'services/inference/requirements.txt') }}
 
       # Installe les dépendances des 2 services testés
+      # scikit-learn 1.5.1 — doit correspondre à la version
+      # utilisée pour entraîner les modèles (churn_pipeline.pkl)
       - name: Installation des dépendances
         run: |
           pip install \
@@ -59,7 +61,7 @@ jobs:
             pydantic==2.7.1 \
             httpx==0.27.0 \
             joblib==1.4.2 \
-            scikit-learn==1.4.2 \
+            scikit-learn==1.5.1 \
             xgboost==2.0.3 \
             pandas==2.2.2 \
             numpy==1.26.4 \
@@ -80,7 +82,7 @@ jobs:
 
   # ───────────────────────────────────────────────────────────
   # Job 2 — Build + Push Docker Hub
-  # Construit les 3 images et les pousse sur Docker Hub.
+  # Construit les 4 images et les pousse sur Docker Hub.
   # Ne s'exécute QUE si le job test est passé (needs: test).
   # ───────────────────────────────────────────────────────────
   build:
@@ -104,12 +106,9 @@ jobs:
       - name: Build + Push monitoring
         uses: docker/build-push-action@v5
         with:
-          # context = dossier du service
           context: ./services/monitoring
-          # file = chemin exact du Dockerfile (paramètre correct pour v5)
           file: ./services/monitoring/Dockerfile
           push: true
-          # Tag de version : 1.0.0 + tag "latest"
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/monitoring-cpr:1.0.0
             ${{ secrets.DOCKERHUB_USERNAME }}/monitoring-cpr:latest
@@ -119,7 +118,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./services/preprocessing
-          # file = chemin exact du Dockerfile (paramètre correct pour v5)
           file: ./services/preprocessing/Dockerfile
           push: true
           tags: |
@@ -133,9 +131,21 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          # file = chemin exact du Dockerfile (paramètre correct pour v5)
           file: ./services/inference/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/inference-cpr:1.0.2
             ${{ secrets.DOCKERHUB_USERNAME }}/inference-cpr:latest
+
+      # ── Image frontend ─────────────────────────────────────
+      # context = racine du projet (.) car le Dockerfile
+      # copie services/frontend/ qui est dans le repo
+      - name: Build + Push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-cpr:1.0.0
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend-cpr:latest

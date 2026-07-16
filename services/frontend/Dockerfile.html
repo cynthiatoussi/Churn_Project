@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TélécomCPR — Prédiction Churn</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:'Plus Jakarta Sans',sans-serif;
+  background:#F3F4F8;color:#1E2030;min-height:100vh;
+}
+
+/* ── Top bar ── */
+.topbar{
+  background:#fff;border-bottom:1px solid #E4E7EF;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.5rem;height:58px;position:sticky;top:0;z-index:50;
+}
+.brand{display:flex;align-items:center;gap:.7rem}
+.brand-icon{
+  width:34px;height:34px;border-radius:8px;
+  background:linear-gradient(135deg,#2563EB,#7C3AED);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:14px;font-weight:700;
+}
+.brand-name{font-size:.95rem;font-weight:700;color:#1E2030}
+.brand-name span{color:#2563EB}
+.topbar-right{display:flex;align-items:center;gap:.75rem}
+.chip{
+  display:flex;align-items:center;gap:.35rem;
+  padding:.3rem .75rem;border-radius:100px;
+  background:#EEF2FF;color:#2563EB;
+  font-size:.7rem;font-weight:600;
+}
+.chip::before{content:'';width:6px;height:6px;border-radius:50%;background:#22C55E;animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.topbar-clock{font-size:.72rem;color:#6B7280;font-family:'Fira Code',monospace}
+
+/* ── Layout ── */
+.layout{
+  max-width:1300px;margin:0 auto;padding:1.25rem;
+  display:grid;grid-template-columns:1fr 380px;gap:1.25rem;
+}
+
+/* ── Panel ── */
+.panel{
+  background:#fff;border:1px solid #E4E7EF;
+  border-radius:12px;overflow:hidden;
+}
+.panel-header{
+  padding:.9rem 1.25rem;border-bottom:1px solid #E4E7EF;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.panel-title{
+  font-size:.8rem;font-weight:700;color:#1E2030;
+  display:flex;align-items:center;gap:.5rem;
+}
+.panel-title i{font-size:15px;color:#2563EB}
+.panel-body{padding:1.25rem}
+
+/* ── Form sections ── */
+.fsec{margin-bottom:1.25rem}
+.fsec:last-child{margin-bottom:0}
+.fsec-label{
+  font-size:.65rem;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:#9CA3AF;
+  margin-bottom:.65rem;display:flex;align-items:center;gap:.35rem;
+}
+.fsec-label i{font-size:12px}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.6rem}
+.field{display:flex;flex-direction:column;gap:.25rem}
+.field label{font-size:.68rem;font-weight:600;color:#6B7280}
+.field input,.field select{
+  background:#F9FAFB;border:1px solid #E4E7EF;
+  border-radius:7px;padding:.42rem .65rem;
+  color:#1E2030;font-family:'Fira Code',monospace;font-size:.76rem;
+  outline:none;transition:all .15s;appearance:none;
+}
+.field input:focus,.field select:focus{
+  background:#fff;border-color:#2563EB;
+  box-shadow:0 0 0 3px rgba(37,99,235,.1);
+}
+
+/* ── Submit ── */
+.submit-btn{
+  width:100%;margin-top:1.25rem;padding:.8rem 1rem;
+  background:#2563EB;border:none;border-radius:8px;
+  color:#fff;font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:.88rem;font-weight:600;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:.5rem;
+  transition:background .15s,transform .1s,box-shadow .15s;
+}
+.submit-btn:hover{background:#1D4ED8;box-shadow:0 4px 12px rgba(37,99,235,.35)}
+.submit-btn:active{transform:scale(.99)}
+.submit-btn:disabled{background:#93C5FD;cursor:not-allowed;transform:none;box-shadow:none}
+.submit-btn i{font-size:15px}
+
+/* ── Right panel ── */
+.right{display:flex;flex-direction:column;gap:1.25rem}
+
+/* ── Score card ── */
+.score-card{
+  background:#fff;border:1px solid #E4E7EF;border-radius:12px;overflow:hidden;
+}
+.score-header{
+  padding:.9rem 1.25rem;border-bottom:1px solid #E4E7EF;
+  display:flex;align-items:center;gap:.5rem;
+}
+.score-header span{font-size:.8rem;font-weight:700;color:#1E2030}
+.score-header i{font-size:15px;color:#2563EB}
+.score-body{padding:1.5rem 1.25rem}
+
+/* Empty */
+.empty{
+  display:flex;flex-direction:column;align-items:center;
+  padding:2.5rem 1rem;gap:.65rem;text-align:center;
+}
+.empty-icon{
+  width:52px;height:52px;border-radius:12px;
+  background:#EEF2FF;display:flex;align-items:center;justify-content:center;
+}
+.empty-icon i{font-size:24px;color:#93C5FD}
+.empty p{font-size:.78rem;color:#9CA3AF;line-height:1.5}
+
+/* Score display */
+.score-display{display:flex;flex-direction:column;align-items:center}
+.score-ring-wrap{position:relative;width:140px;height:140px;margin:0 auto}
+.score-ring-wrap svg{width:140px;height:140px;transform:rotate(-90deg)}
+.ring-bg{fill:none;stroke:#F3F4F8;stroke-width:12}
+.ring-fg{fill:none;stroke-width:12;stroke-linecap:round;transition:stroke-dashoffset .9s ease,stroke .5s}
+.score-inner{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+}
+.score-pct{font-size:2rem;font-weight:700;font-family:'Fira Code',monospace;transition:color .5s}
+.score-sub{font-size:.6rem;color:#9CA3AF;letter-spacing:.06em;text-transform:uppercase}
+.score-badge{
+  margin-top:1rem;padding:.3rem 1rem;border-radius:100px;
+  font-size:.7rem;font-weight:600;transition:all .4s;
+  background:#F3F4F8;color:#6B7280;
+}
+
+/* Offer card */
+.offer-card{
+  margin-top:1.25rem;padding:1rem;border-radius:10px;
+  border:1px solid #E4E7EF;background:#F9FAFB;
+  display:flex;align-items:flex-start;gap:.85rem;transition:border-color .4s,background .4s;
+}
+.offer-emoji{
+  width:40px;height:40px;border-radius:9px;flex-shrink:0;
+  background:#EEF2FF;display:flex;align-items:center;justify-content:center;
+  font-size:1.2rem;
+}
+.offer-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9CA3AF;margin-bottom:.15rem}
+.offer-name{font-size:.9rem;font-weight:700;color:#1E2030}
+.offer-desc{font-size:.7rem;color:#6B7280;line-height:1.45;margin-top:.2rem}
+
+/* ── Monitoring ── */
+.mon-card{
+  background:#fff;border:1px solid #E4E7EF;
+  border-radius:12px;overflow:hidden;
+}
+.mon-header{
+  padding:.9rem 1.25rem;border-bottom:1px solid #E4E7EF;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.mon-title{font-size:.8rem;font-weight:700;color:#1E2030;display:flex;align-items:center;gap:.45rem}
+.mon-title i{font-size:15px;color:#2563EB}
+.mon-body{padding:1rem 1.25rem}
+.mon-grid{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:1rem}
+.mon-stat{
+  background:#F9FAFB;border:1px solid #E4E7EF;
+  border-radius:8px;padding:.75rem;
+}
+.mon-val{font-size:1.25rem;font-weight:700;color:#1E2030;font-family:'Fira Code',monospace}
+.mon-key{font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;color:#9CA3AF;margin-top:.15rem}
+.ref-btn{
+  background:none;border:1px solid #E4E7EF;border-radius:7px;
+  padding:.28rem .6rem;color:#6B7280;font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:.65rem;font-weight:600;cursor:pointer;
+  display:flex;align-items:center;gap:.3rem;transition:all .15s;
+}
+.ref-btn:hover{border-color:#2563EB;color:#2563EB}
+.ref-btn i{font-size:12px}
+
+/* dist */
+.dist-title{font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9CA3AF;margin-bottom:.5rem}
+.dist-rows{display:flex;flex-direction:column;gap:.35rem}
+.dist-row{display:flex;align-items:center;gap:.5rem}
+.dist-lbl{font-size:.65rem;color:#6B7280;width:110px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dist-track{flex:1;height:4px;background:#F3F4F8;border-radius:4px;overflow:hidden}
+.dist-bar{height:100%;background:#2563EB;border-radius:4px;transition:width .7s ease}
+.dist-n{font-size:.65rem;color:#9CA3AF;font-family:'Fira Code',monospace;width:22px;text-align:right}
+
+/* toast */
+.toast{
+  position:fixed;bottom:1.25rem;right:1.25rem;z-index:999;
+  padding:.6rem 1rem;border-radius:8px;font-size:.76rem;font-weight:500;
+  background:#fff;border:1px solid #E4E7EF;
+  box-shadow:0 4px 16px rgba(0,0,0,.08);
+  transform:translateY(60px);opacity:0;transition:all .25s;
+  display:flex;align-items:center;gap:.5rem;
+}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.ok{border-color:#22C55E;color:#15803D}
+.toast.ok::before{content:'✓';font-weight:700}
+.toast.err{border-color:#EF4444;color:#B91C1C}
+.toast.err::before{content:'✗';font-weight:700}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-icon">T</div>
+    <div class="brand-name"><span>Télécom</span>CPR &nbsp;·&nbsp; Prédiction Churn</div>
+  </div>
+  <div class="topbar-right">
+    <div class="chip">Système en ligne</div>
+    <div class="topbar-clock" id="clk">--:--:--</div>
+  </div>
+</div>
+
+<!-- Main layout -->
+<div class="layout">
+
+  <!-- ── Formulaire ── -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">
+        <i class="ti ti-user-search" aria-hidden="true"></i>Analyse d'un profil client
+      </div>
+    </div>
+    <div class="panel-body">
+
+      <div class="fsec">
+        <div class="fsec-label"><i class="ti ti-user" aria-hidden="true"></i>Informations personnelles</div>
+        <div class="fgrid">
+          <div class="field"><label>Genre</label>
+            <select id="gender"><option>Male</option><option>Female</option></select></div>
+          <div class="field"><label>Senior citizen</label>
+            <select id="SeniorCitizen"><option value="0">Non</option><option value="1">Oui</option></select></div>
+          <div class="field"><label>Partenaire</label>
+            <select id="Partner"><option>Yes</option><option>No</option></select></div>
+          <div class="field"><label>Personnes à charge</label>
+            <select id="Dependents"><option>No</option><option>Yes</option></select></div>
+        </div>
+      </div>
+
+      <div class="fsec">
+        <div class="fsec-label"><i class="ti ti-receipt" aria-hidden="true"></i>Contrat &amp; facturation</div>
+        <div class="fgrid">
+          <div class="field"><label>Ancienneté (mois)</label>
+            <input type="number" id="tenure" value="12" min="0" max="72"></div>
+          <div class="field"><label>Type de contrat</label>
+            <select id="Contract">
+              <option>Month-to-month</option><option>One year</option><option>Two year</option>
+            </select></div>
+          <div class="field"><label>Facturation dématérialisée</label>
+            <select id="PaperlessBilling"><option>Yes</option><option>No</option></select></div>
+          <div class="field"><label>Mode de paiement</label>
+            <select id="PaymentMethod">
+              <option>Electronic check</option><option>Mailed check</option>
+              <option>Bank transfer (automatic)</option><option>Credit card (automatic)</option>
+            </select></div>
+          <div class="field"><label>Charge mensuelle (€)</label>
+            <input type="number" id="MonthlyCharges" value="65" step="0.01"></div>
+          <div class="field"><label>Charge totale (€)</label>
+            <input type="number" id="TotalCharges" value="780" step="0.01"></div>
+        </div>
+      </div>
+
+      <div class="fsec">
+        <div class="fsec-label"><i class="ti ti-phone" aria-hidden="true"></i>Services téléphoniques</div>
+        <div class="fgrid">
+          <div class="field"><label>Service téléphonique</label>
+            <select id="PhoneService"><option>Yes</option><option>No</option></select></div>
+          <div class="field"><label>Lignes multiples</label>
+            <select id="MultipleLines">
+              <option>No</option><option>Yes</option><option>No phone service</option>
+            </select></div>
+        </div>
+      </div>
+
+      <div class="fsec">
+        <div class="fsec-label"><i class="ti ti-wifi" aria-hidden="true"></i>Services internet</div>
+        <div class="fgrid">
+          <div class="field"><label>Service internet</label>
+            <select id="InternetService">
+              <option>Fiber optic</option><option>DSL</option><option>No</option>
+            </select></div>
+          <div class="field"><label>Sécurité en ligne</label>
+            <select id="OnlineSecurity"><option>No</option><option>Yes</option><option>No internet service</option></select></div>
+          <div class="field"><label>Sauvegarde en ligne</label>
+            <select id="OnlineBackup"><option>No</option><option>Yes</option><option>No internet service</option></select></div>
+          <div class="field"><label>Protection appareil</label>
+            <select id="DeviceProtection"><option>No</option><option>Yes</option><option>No internet service</option></select></div>
+          <div class="field"><label>Support technique</label>
+            <select id="TechSupport"><option>No</option><option>Yes</option><option>No internet service</option></select></div>
+          <div class="field"><label>Streaming TV</label>
+            <select id="StreamingTV"><option>No</option><option>Yes</option><option>No internet service</option></select></div>
+          <div class="field"><label>Streaming films</label>
+            <select id="StreamingMovies"><option>No</option><option>Yes</option><option>No internet service</option></select></div>
+        </div>
+      </div>
+
+      <button class="submit-btn" id="btn" onclick="predict()">
+        <i class="ti ti-analyze" aria-hidden="true"></i>Analyser le risque de résiliation
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ── Colonne droite ── -->
+  <div class="right">
+
+    <!-- Score card -->
+    <div class="score-card">
+      <div class="score-header">
+        <i class="ti ti-chart-donut" aria-hidden="true"></i>
+        <span>Score de risque</span>
+      </div>
+
+      <!-- Empty state -->
+      <div class="score-body" id="empty-state">
+        <div class="empty">
+          <div class="empty-icon"><i class="ti ti-sparkles" aria-hidden="true"></i></div>
+          <p>Sélectionnez un profil client et lancez l'analyse pour voir le score de risque et l'offre recommandée.</p>
+        </div>
+      </div>
+
+      <!-- Result state -->
+      <div class="score-body" id="result-state" style="display:none">
+        <div class="score-display">
+          <div class="score-ring-wrap">
+            <svg viewBox="0 0 140 140" aria-hidden="true">
+              <circle class="ring-bg" cx="70" cy="70" r="54"/>
+              <circle class="ring-fg" id="ring" cx="70" cy="70" r="54"
+                stroke-dasharray="339.3" stroke-dashoffset="339.3"/>
+            </svg>
+            <div class="score-inner">
+              <div class="score-pct" id="pct">—</div>
+              <div class="score-sub">risque churn</div>
+            </div>
+          </div>
+          <div class="score-badge" id="badge">—</div>
+        </div>
+
+        <div class="offer-card" id="offer-card">
+          <div class="offer-emoji" id="offer-emoji">💡</div>
+          <div>
+            <div class="offer-label">Offre recommandée</div>
+            <div class="offer-name" id="offer-name">—</div>
+            <div class="offer-desc" id="offer-desc">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monitoring -->
+    <div class="mon-card">
+      <div class="mon-header">
+        <div class="mon-title">
+          <i class="ti ti-activity" aria-hidden="true"></i>Monitoring temps réel
+        </div>
+        <button class="ref-btn" onclick="loadMetrics()">
+          <i class="ti ti-refresh" aria-hidden="true"></i>Actualiser
+        </button>
+      </div>
+      <div class="mon-body">
+        <div class="mon-grid">
+          <div class="mon-stat">
+            <div class="mon-val" id="m-tot" style="color:#2563EB">—</div>
+            <div class="mon-key">Requêtes</div>
+          </div>
+          <div class="mon-stat">
+            <div class="mon-val" id="m-rate" style="color:#16A34A">—</div>
+            <div class="mon-key">Taux de succès</div>
+          </div>
+          <div class="mon-stat">
+            <div class="mon-val" id="m-lat">—</div>
+            <div class="mon-key">Latence moy.</div>
+          </div>
+          <div class="mon-stat">
+            <div class="mon-val" id="m-p95">—</div>
+            <div class="mon-key">Latence P95</div>
+          </div>
+        </div>
+        <div class="dist-title">Distribution des offres</div>
+        <div class="dist-rows" id="dist">
+          <div style="font-size:.72rem;color:#9CA3AF;padding:.25rem 0">Aucune donnée disponible</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const OFFERS={
+  remise_tarifaire:{e:'💸',n:'Remise tarifaire',d:'Réduction sur la facture mensuelle pour fidéliser le client à risque.'},
+  upgrade_forfait: {e:'⬆️',n:'Upgrade de forfait',d:'Proposition de montée en gamme avec valeur ajoutée perçue.'},
+  offre_fidelite:  {e:'🎁',n:'Offre fidélité',d:"Récompense de l'ancienneté par des avantages exclusifs."},
+  option_gratuite: {e:'🎉',n:'Option gratuite',d:"Ajout d'une option sans surcoût pour renforcer l'attachement."},
+  maintien_standard:{e:'✅',n:'Maintien standard',d:'Profil stable — pas de risque détecté, maintien de l\'offre actuelle.'},
+};
+setInterval(()=>{document.getElementById('clk').textContent=new Date().toLocaleTimeString('fr-FR')},1000);
+function toast(msg,t){const el=document.getElementById('toast');el.textContent=msg;el.className='toast '+t+' show';setTimeout(()=>el.className='toast',3000)}
+async function predict(){
+  const btn=document.getElementById('btn');
+  btn.disabled=true;btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 1s linear infinite;font-size:15px"></i>&nbsp;Analyse en cours…';
+  const p={gender:v('gender'),SeniorCitizen:+v('SeniorCitizen'),Partner:v('Partner'),Dependents:v('Dependents'),tenure:+v('tenure'),Contract:v('Contract'),PaperlessBilling:v('PaperlessBilling'),PaymentMethod:v('PaymentMethod'),PhoneService:v('PhoneService'),MultipleLines:v('MultipleLines'),InternetService:v('InternetService'),OnlineSecurity:v('OnlineSecurity'),OnlineBackup:v('OnlineBackup'),DeviceProtection:v('DeviceProtection'),TechSupport:v('TechSupport'),StreamingTV:v('StreamingTV'),StreamingMovies:v('StreamingMovies'),MonthlyCharges:+v('MonthlyCharges'),TotalCharges:+v('TotalCharges')};
+  try{
+    const r=await fetch('/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+    if(!r.ok)throw new Error('Erreur HTTP '+r.status);
+    const d=await r.json();render(d);loadMetrics();toast('Analyse terminée avec succès','ok');
+  }catch(e){toast(e.message,'err');}
+  finally{btn.disabled=false;btn.innerHTML='<i class="ti ti-analyze"></i>Analyser le risque de résiliation';}
+}
+function v(id){return document.getElementById(id).value}
+function render(d){
+  document.getElementById('empty-state').style.display='none';
+  document.getElementById('result-state').style.display='block';
+  const pct=Math.round(d.churn_probability*100);
+  const circ=339.3;
+  document.getElementById('ring').style.strokeDashoffset=circ-(circ*pct/100);
+  let clr,bgtxt,bgst;
+  if(pct<32){clr='#16A34A';bgtxt='Risque faible';bgst='background:#F0FDF4;color:#15803D'}
+  else if(pct<60){clr='#D97706';bgtxt='Risque modéré';bgst='background:#FFFBEB;color:#B45309'}
+  else{clr='#DC2626';bgtxt='Risque élevé';bgst='background:#FEF2F2;color:#B91C1C'}
+  document.getElementById('ring').style.stroke=clr;
+  const p2=document.getElementById('pct');p2.textContent=pct+'%';p2.style.color=clr;
+  const b=document.getElementById('badge');b.textContent=bgtxt;b.style.cssText=bgst+'border-radius:100px;padding:.3rem 1rem;font-size:.7rem;font-weight:600;margin-top:1rem;display:inline-block';
+  const o=OFFERS[d.recommended_offer]||OFFERS.maintien_standard;
+  document.getElementById('offer-emoji').textContent=o.e;
+  document.getElementById('offer-name').textContent=o.n;
+  document.getElementById('offer-desc').textContent=o.d;
+  if(pct>=32){document.getElementById('offer-card').style.cssText='margin-top:1.25rem;padding:1rem;border-radius:10px;border:1px solid #BFDBFE;background:#EFF6FF;display:flex;align-items:flex-start;gap:.85rem;transition:all .4s';}
+}
+async function loadMetrics(){
+  try{
+    const r=await fetch('/metrics');if(!r.ok)return;const d=await r.json();
+    document.getElementById('m-tot').textContent=d.total_requests??'—';
+    document.getElementById('m-rate').textContent=d.success_rate_pct!=null?d.success_rate_pct+'%':'—';
+    document.getElementById('m-lat').textContent=d.avg_latency_s!=null?Math.round(d.avg_latency_s*1000)+' ms':'—';
+    document.getElementById('m-p95').textContent=d.p95_latency_s!=null?Math.round(d.p95_latency_s*1000)+' ms':'—';
+    const dist=d.offer_distribution||{};const tot=Object.values(dist).reduce((a,b)=>a+b,0)||1;
+    const el=document.getElementById('dist');
+    if(!Object.keys(dist).length){el.innerHTML='<div style="font-size:.72rem;color:#9CA3AF;padding:.25rem 0">Aucune donnée disponible</div>';return;}
+    el.innerHTML=Object.entries(dist).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
+      <div class="dist-row">
+        <div class="dist-lbl">${OFFERS[k]?.n||k}</div>
+        <div class="dist-track"><div class="dist-bar" style="width:${Math.round(v/tot*100)}%"></div></div>
+        <div class="dist-n">${v}</div>
+      </div>`).join('');
+  }catch(e){}
+}
+loadMetrics();setInterval(loadMetrics,10000);
+</script>
+</body>
+</html>
