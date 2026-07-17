@@ -95,7 +95,7 @@ spec:
               # 700m = 0.7 CPU → dimensionné pour 2 workers Gunicorn
               # (règle : 2 × 0.7 + 1 ≈ 2 workers)
               # Permet de tenir 150 req/min au niveau stress
-              cpu: "300m"
+              cpu: "100m"
               # 300Mi couvre le pic de démarrage (~230Mi estimé)
               # avec une marge de 30%
               memory: "400Mi"
@@ -103,10 +103,10 @@ spec:
               # 900m : burst autorisé pendant les pics de charge
               # throttling silencieux au-delà → latence augmente
               # mais le pod ne redémarre pas
-              cpu: "900m"
+              cpu: "300m"
               # 512Mi : marge pour les pics sous charge intense
               # OOMKill si dépassé → pod redémarre
-              memory: "768Mi"
+              memory: "512Mi"
           # ── Health checks ────────────────────────────────
           # initialDelaySeconds plus long pour inference car :
           # → les modèles ML mettent plusieurs secondes à se charger
