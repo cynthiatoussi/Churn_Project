@@ -51,7 +51,7 @@ spec:
       # 512Mi = calé sur limits.memory du service inference.
       max:
         cpu: "1200m"
-        memory: "512Mi"
+        memory: "768Mi"
 
       # ── Limits par défaut ─────────────────────────────────
       # Appliquées si un conteneur ne déclare pas de limits.

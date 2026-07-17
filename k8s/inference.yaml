@@ -106,7 +106,7 @@ spec:
               cpu: "900m"
               # 512Mi : marge pour les pics sous charge intense
               # OOMKill si dépassé → pod redémarre
-              memory: "512Mi"
+              memory: "768Mi"
           # ── Health checks ────────────────────────────────
           # initialDelaySeconds plus long pour inference car :
           # → les modèles ML mettent plusieurs secondes à se charger
